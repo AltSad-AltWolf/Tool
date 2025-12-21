@@ -1,0 +1,9 @@
+pip install phonenumbers
+pip install requests
+pip install discord.py
+pip install pyngrok
+pip install flask
+pip install colorama
+pip install pillow
+pip install pyinstaller
+pip install certifi
