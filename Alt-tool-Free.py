@@ -1529,7 +1529,7 @@ if __name__ == "__main__":
         flask_thread.start()
         time.sleep(2)
 
-        print(" Création du tunnel HTTP ngrok (GRATUIT)...")
+        print(" Création du tunnel HTTP...")
         try:
             tunnel = ngrok.connect(port, "http", pyngrok_config=pyngrok_config)
             public_url = tunnel.public_url
