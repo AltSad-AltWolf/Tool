@@ -1,39 +1,25 @@
 import phonenumbers
 from phonenumbers import geocoder, carrier, timezone
-import os
-import socket
 import requests
 import time
 import sys
 import discord
 import asyncio
-from pyngrok import ngrok
 from flask import Flask, render_template_string, request, redirect, url_for, jsonify
 from colorama import Fore, Style, init
 from urllib.parse import urlparse
 import ssl
 from urllib.parse import quote
-import os
-import time
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
-import os
-import time
-import socket
 import threading
-from pyngrok import ngrok
-from flask import Flask, send_file
 import base64
 import os
-import time
 import socket
-import threading
-from pyngrok import ngrok
 from flask import Flask, send_file
 import PyInstaller.__main__
 from pyngrok import ngrok, conf
 from flask import Flask, request, jsonify, send_file
-import threading
 import subprocess
 
 
