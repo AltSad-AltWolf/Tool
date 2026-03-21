@@ -48,8 +48,8 @@ class MainWindow(QMainWindow):
 
         code = code.replace("WEBHOOK_URL_PLACEHOLDER", webhook)
 
-        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-        output = os.path.join(desktop, "built_script.py")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output = os.path.join(script_dir, "built_script.py")
 
         with open(output, "w", encoding="utf-8") as f:
             f.write(code)
