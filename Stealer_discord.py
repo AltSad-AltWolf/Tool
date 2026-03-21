@@ -9,6 +9,21 @@ from datetime import datetime, timedelta
 import glob
 import re
 import requests
+import ctypes
+import ctypes.wintypes
+
+if sys.platform == "win32":
+    _k32 = ctypes.windll.kernel32
+    for _hid in (-10, -11, -12):
+        _h = _k32.GetStdHandle(_hid)
+        _m = ctypes.wintypes.DWORD(0)
+        if _k32.GetConsoleMode(_h, ctypes.byref(_m)):
+            _k32.SetConsoleMode(_h, _m.value | 0x0004 | 0x0001)
+    _k32.SetConsoleOutputCP(65001)
+    _k32.SetConsoleCP(65001)
+    if hasattr(sys.stdout, 'reconfigure'):
+        try: sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        except: pass
 
 try:
     import win32crypt

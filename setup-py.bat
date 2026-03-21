@@ -1,10 +1,14 @@
 @echo off
 chcp 65001 >nul 2>&1
 
-echo Installing modules...
+echo Installing required Python modules...
+python -m pip install --upgrade pip
+
 python -m pip install requests flask pyngrok phonenumbers pefile python-magic-bin discord.py discord-webhook colorama PyQt5
+python -m pip install keyboard pyautogui opencv-python pywin32
+
 echo.
-echo Done!
+echo All modules installed!
 echo.
 
 where wt >nul 2>&1
