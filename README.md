@@ -21,6 +21,7 @@ This tool is a demo version and is not as powerful as the full version.
 Support
 
 If you have a problem running the .exe, and if it is related to phishing features, it is recommended to install ngrok.
+You need to install Python from the website, then run the setup-py or setup-exe.
 
 Join our Discord server for help and discussions:
 https://discord.com/invite/aaSnsuZakJ
